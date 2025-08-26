@@ -1,33 +1,53 @@
 import { Request, Response, NextFunction } from 'express';
 import * as Sentry from '@sentry/node';
 import { config } from '../config';
-
-interface AppError extends Error {
-  statusCode?: number;
-}
+import { AppError, ErrorResponse } from '../types/errors';
 
 export const errorHandler = (
-  err: AppError,
+  err: Error,
   req: Request,
   res: Response,
   next: NextFunction
 ) => {
-  // Log error to Sentry if configured
-  if (config.sentry.dsn) {
-    Sentry.captureException(err);
+  // Convert to AppError if not already
+  const appError = err instanceof AppError ? err : new AppError(
+    err.message || 'An unexpected error occurred',
+    500
+  );
+
+  // Add request context for better error tracking
+  if (config.sentry.enabled) {
+    // Initialize Sentry with current config if not already done
+    if (!Sentry.getCurrentHub().getClient()) {
+      Sentry.init({
+        dsn: config.sentry.dsn,
+        environment: config.sentry.environment,
+        release: config.sentry.release,
+        sampleRate: config.sentry.sampleRate,
+      });
+    }
+    
+    Sentry.withScope((scope) => {
+      scope.setContext('request', {
+        url: req.url,
+        method: req.method,
+        query: req.query,
+        headers: req.headers,
+        userId: (req as any).user?.id,
+      });
+      Sentry.captureException(err);
+    });
   }
 
-  // Set default status code if not provided
-  const statusCode = err.statusCode || 500;
-
-  // Don't expose stack traces in production
-  const error = {
-    message: err.message,
-    stack: config.environment === 'development' ? err.stack : undefined,
+  // Prepare error response
+  const errorResponse: ErrorResponse = {
+    success: false,
+    error: {
+      ...appError.toJSON(),
+      // Only include stack trace in development
+      stack: config.environment === 'development' ? appError.stack : undefined,
+    },
   };
 
-  res.status(statusCode).json({
-    success: false,
-    error,
-  });
+  res.status(appError.statusCode).json(errorResponse);
 };
