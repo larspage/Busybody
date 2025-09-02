@@ -3,15 +3,17 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-// Sentry DSN format validation
-const sentryDsnSchema = z
-  .string()
-  .url()
-  .regex(
-    /^https:\/\/[a-zA-Z0-9]+@[a-zA-Z0-9]+\.ingest\.sentry\.io\/[0-9]+$/,
-    'Invalid Sentry DSN format'
-  )
-  .optional();
+// Sentry DSN format validation - strict in production, optional in dev/test
+const sentryDsnSchema = z.union([
+  z.string()
+    .url()
+    .regex(
+      /^https:\/\/[a-zA-Z0-9]+@[a-zA-Z0-9]+\.ingest\.sentry\.io\/[0-9]+$/,
+      'Invalid Sentry DSN format'
+    ),
+  z.string().length(0),
+  z.undefined()
+]);
 
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
